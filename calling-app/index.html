@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Intercom 🚨</title>
+    <!-- Tailwind CSS for modern, high-contrast and responsive design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for better readability -->
+    <link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+    <style>
+        body {
+            font-family: 'Hind', sans-serif;
+            touch-action: manipulation; /* Mobile click delay prevent karne ke liye */
+        }
+        /* Continuous pulse animation alert background ke liye */
+        @keyframes emergency-pulse {
+            0%, 100% { background-color: #ef4444; }
+            50% { background-color: #b91c1c; }
+        }
+        .animate-emergency {
+            animation: emergency-pulse 1s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen flex flex-col justify-between text-slate-800 selection:bg-red-200">
+
+    <!-- 1. SETUP SCREEN -->
+    <div id="setup-screen" class="hidden fixed inset-0 bg-slate-900 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border-4 border-blue-500">
+            <h2 class="text-3xl font-extrabold text-slate-900 text-center mb-2">🏠 Family Intercom</h2>
+            <p class="text-slate-600 text-center mb-6 text-lg">Pehli baar setup karein taaki sab pehchan sakein</p>
+            
+            <form id="setup-form" class="space-y-5">
+                <div>
+                    <label class="block text-xl font-bold mb-2 text-slate-700">Aapka Naam:</label>
+                    <input type="text" id="setup-name" required placeholder="Jaise: Mohan, Ramesh, Seema" 
+                           class="w-full p-4 text-xl border-2 border-slate-300 rounded-xl focus:outline-none focus:border-blue-500">
+                </div>
+                
+                <div>
+                    <label class="block text-xl font-bold mb-2 text-slate-700">Rishta (Relation):</label>
+                    <select id="setup-relation" required 
+                            class="w-full p-4 text-xl border-2 border-slate-300 rounded-xl bg-white focus:outline-none focus:border-blue-500">
+                        <option value="" disabled selected>Select karein...</option>
+                        <option value="Baba">Baba</option>
+                        <option value="Dadi">Dadi</option>
+                        <option value="Papa">Papa</option>
+                        <option value="Mummy">Mummy</option>
+                        <option value="Beta">Beta (Son)</option>
+                        <option value="Beti">Beti (Daughter)</option>
+                        <option value="Nati">Nati (Grandson)</option>
+                        <option value="Pota">Pota (Grandson)</option>
+                        <option value="Bahu">Bahu</option>
+                        <option value="Didi">Didi</option>
+                        <option value="Bhai">Bhai</option>
+                    </select>
+                </div>
+
+                <button type="submit" 
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-2xl py-5 rounded-2xl shadow-lg transition active:scale-95 duration-100">
+                    💾 Save & Start karein
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN APP INTERFACE -->
+    <div id="app-container" class="flex-grow flex flex-col max-w-2xl mx-auto w-full p-4 pb-24">
+        
+        <!-- Header status bar -->
+        <header class="bg-white rounded-2xl p-4 shadow-md mb-4 flex justify-between items-center border border-slate-200">
+            <div>
+                <span class="text-sm text-slate-500 font-bold uppercase tracking-wider block">Aapki Profile</span>
+                <span id="current-user-tag" class="text-xl font-extrabold text-blue-700">Connecting...</span>
+            </div>
+            <button onclick="resetProfile()" class="bg-slate-200 hover:bg-slate-300 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-700 transition">
+                Profile badlein ⚙️
+            </button>
+        </header>
+
+        <!-- Dynamic Family Members List -->
+        <main class="flex-grow space-y-4">
+            <h3 class="text-xl font-bold text-slate-700 flex items-center gap-2 px-1">
+                <span class="inline-block w-3 h-3 rounded-full bg-green-500 animate-ping"></span>
+                Family Members (Bulaane ke liye naam par touch karein):
+            </h3>
+
+            <!-- Members list loaded dynamically -->
+            <div id="members-list" class="grid grid-cols-1 gap-3">
+                <div class="bg-white p-6 rounded-2xl text-center text-slate-500 border border-slate-200 shadow-sm font-bold">
+                    Sadasyon ki khoj ho rhi hai...
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- OUTGOING SENT NOTIFICATION MODAL -->
+    <div id="outgoing-modal" class="hidden fixed inset-0 bg-black/70 z-40 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md text-center shadow-2xl">
+            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                <span class="text-3xl">📤</span>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">Bulao bhej diya hai!</h3>
+            <p id="outgoing-target-text" class="text-lg text-slate-600 mb-6">Uthega tab jawab aayega...</p>
+            <div id="acknowledgment-status" class="text-amber-600 font-bold text-lg mb-6 animate-pulse">
+                Unke phone par ghanti baj rhi hai... 🔔
+            </div>
+            <button onclick="clearOutgoingAlert()" 
+                    class="w-full bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-4 rounded-xl transition">
+                Wapas Jayein ❌
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. INCOMING EMERGENCY SCREEN (FULL OVERLAY) -->
+    <div id="alert-overlay" class="hidden fixed inset-0 z-50 animate-emergency flex flex-col justify-between p-6">
+        <div class="flex-grow flex flex-col items-center justify-center text-center text-white select-none">
+            <!-- Icon pulse -->
+            <div class="text-8xl mb-6 animate-bounce">🚨</div>
+            
+            <!-- Dynamic Emergency Text -->
+            <h1 id="alert-headline" class="text-4xl md:text-5xl font-black tracking-wide leading-tight px-2">
+                Koi bula rha hai!
+            </h1>
+            
+            <p id="alert-subtext" class="text-2xl mt-4 font-bold bg-black/30 px-6 py-2 rounded-full">
+                Phone baj rha hai...
+            </p>
+
+            <p id="alert-custom-msg" class="text-xl mt-4 italic text-yellow-200 font-semibold px-4 max-w-md"></p>
+        </div>
+
+        <!-- 4. QUICK REPLY BUTTON -->
+        <div class="w-full max-w-md mx-auto mb-6">
+            <button id="btn-acknowledge" onclick="acknowledgeAlert()" 
+                    class="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black text-3xl py-7 rounded-3xl shadow-[0_10px_30px_rgba(0,0,0,0.3)] border-4 border-white transition duration-150">
+                ✅ Aa rha hu!
+            </button>
+        </div>
+    </div>
+
+    <!-- Custom Toast Notification for generic alerts -->
+    <div id="toast-notif" class="fixed top-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white font-bold px-6 py-4 rounded-full shadow-2xl border-2 border-slate-700 hidden z-50 transition duration-300 text-center max-w-sm">
+        <span id="toast-text"></span>
+    </div>
+
+    <!-- Footer static status info -->
+    <footer class="text-center p-3 text-xs text-slate-400 bg-slate-50 border-t border-slate-200">
+        Family Intercom App • Safe, Fast & Loud 🔊
+    </footer>
+
+    <!-- LOGIC INTEGRATION -->
+    <script>
+        // ----------------- FIREBASE CONFIGURATION -----------------
+        // Yahan par apna Firebase project configuration details daliye.
+        const firebaseConfig = {
+  apiKey: "AIzaSyC00X4y6GuPH_phD5gUEEdKSfRoaCKSWtY",
+  authDomain: "calling-app-70ebb.firebaseapp.com",
+  databaseURL: "https://calling-app-70ebb-default-rtdb.firebaseio.com",
+  projectId: "calling-app-70ebb",
+  storageBucket: "calling-app-70ebb.firebasestorage.app",
+  messagingSenderId: "600802537511",
+  appId: "1:600802537511:web:e806378d81fb9f545ade02",
+  measurementId: "G-M7XERL91HT"
+};
+
+        // Firebase Initialize karein
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // ----------------- APP STATE & VARIABLES -----------------
+        let currentUser = null; 
+        let currentUserId = null;
+        let incomingAlertRef = null;
+        let sentAlertRef = null;
+        let audioCtx = null;
+        let beepInterval = null;
+
+        // ----------------- WEB AUDIO BEEP SYSTEM -----------------
+        // Modern browsers without user activity sound play nahi karne dete.
+        // Setup Screen ya screen touch par hum Web Audio API ko dynamic sound create karne ke liye taiyyar karte hain.
+        function initializeAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // 3. LOUD BEEP SOUND (Looping Beep Beep)
+        function startLoudBeep() {
+            initializeAudio();
+            if (beepInterval) return; // Pehle se chal rha hai to ignore
+
+            // Loud Beep generator loop
+            beepInterval = setInterval(() => {
+                if (!audioCtx) return;
+
+                // Beep structure generator
+                let osc = audioCtx.createOscillator();
+                let gainNode = audioCtx.createGain();
+
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                osc.type = 'sawtooth'; // Loud high frequency sound
+                osc.frequency.setValueAtTime(950, audioCtx.currentTime); // High pitched beep frequency
+                gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+
+                // Start instant Beep
+                osc.start();
+                
+                // Diminish the sound smoothly in 0.4 seconds to mimic natural Intercom beep
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc.stop(audioCtx.currentTime + 0.5);
+
+            }, 750); // Har 0.75 seconds me beep baje
+        }
+
+        function stopLoudBeep() {
+            if (beepInterval) {
+                clearInterval(beepInterval);
+                beepInterval = null;
+            }
+        }
+
+        // ----------------- APP INITIALIZATION -----------------
+        window.addEventListener('DOMContentLoaded', () => {
+            // Screen clicks handle audio permission
+            document.body.addEventListener('click', initializeAudio, { once: true });
+            checkUserProfile();
+        });
+
+        // Local Storage check profile
+        function checkUserProfile() {
+            const savedUser = localStorage.getItem('family_intercom_user');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                currentUserId = currentUser.id;
+                document.getElementById('setup-screen').classList.add('hidden');
+                document.getElementById('current-user-tag').innerText = `Aap: ${currentUser.relation} (${currentUser.name})`;
+                setupRealtimeListeners();
+            } else {
+                document.getElementById('setup-screen').classList.remove('hidden');
+            }
+        }
+
+        // Setup Form Submit
+        document.getElementById('setup-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            initializeAudio(); // Capture click for audio trigger permissions
+
+            const nameInput = document.getElementById('setup-name').value.trim();
+            const relationInput = document.getElementById('setup-relation').value;
+
+            if (!nameInput || !relationInput) return;
+
+            // Naya unique user system key banayein
+            const randomId = 'user_' + Math.random().toString(36).substring(2, 9);
+            const userProfile = {
+                id: randomId,
+                name: nameInput,
+                relation: relationInput,
+                lastSeen: Date.now()
+            };
+
+            // Save in LocalStorage
+            localStorage.setItem('family_intercom_user', JSON.stringify(userProfile));
+            currentUser = userProfile;
+            currentUserId = randomId;
+
+            // Fire and hide setup
+            document.getElementById('setup-screen').classList.add('hidden');
+            document.getElementById('current-user-tag').innerText = `Aap: ${currentUser.relation} (${currentUser.name})`;
+            
+            setupRealtimeListeners();
+        });
+
+        // ----------------- FIREBASE REALTIME SYNC -----------------
+        function setupRealtimeListeners() {
+            if (!currentUserId) return;
+
+            // 1. Apni profile Firebase Database par online register karein aur tab sync rakhein
+            const userStatusRef = database.ref(`/users/${currentUserId}`);
+            userStatusRef.set({
+                id: currentUserId,
+                name: currentUser.name,
+                relation: currentUser.relation,
+                lastSeen: Date.now()
+            });
+
+            // Browser tab band hone par list se auto offline/remove ho jaye (keep clean database)
+            userStatusRef.onDisconnect().remove();
+
+            // Heartbeat update har 30 second me online rakhne ke liye
+            setInterval(() => {
+                userStatusRef.update({ lastSeen: Date.now() });
+            }, 30000);
+
+            // 2. Family Members directory read list updates
+            database.ref('/users').on('value', (snapshot) => {
+                const membersListDiv = document.getElementById('members-list');
+                membersListDiv.innerHTML = ''; // Fresh render
+                
+                let foundOthers = false;
+
+                snapshot.forEach((childSnapshot) => {
+                    const member = childSnapshot.val();
+                    // Khud ko chhod kar baki sabhi family members ko list me dikhayein
+                    if (member.id !== currentUserId) {
+                        foundOthers = true;
+                        
+                        // User representation elements creation
+                        const memberCard = document.createElement('div');
+                        memberCard.className = "bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition duration-200";
+                        
+                        memberCard.innerHTML = `
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-2xl font-bold text-blue-600">
+                                        ${member.relation.charAt(0)}
+                                    </div>
+                                    <div>
+                                        <h4 class="text-2xl font-extrabold text-slate-800">${member.relation} (${member.name})</h4>
+                                        <span class="text-sm font-semibold text-emerald-600 flex items-center gap-1">
+                                            <span class="w-2.5 h-2.5 bg-emerald-500 rounded-full"></span> Online
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="flex flex-col gap-2">
+                                    <!-- 🚨 BIG BUZZER BUTTON -->
+                                    <button onclick="sendAlert('${member.id}', '${member.name}', '${member.relation}', '')" 
+                                            class="bg-red-500 hover:bg-red-600 active:scale-95 text-white font-black text-xl py-3 px-6 rounded-2xl shadow-md transition duration-100">
+                                        🚨 Bulao! (Buzzer)
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- 5. CUSTOM MESSAGE BOX -->
+                            <div class="mt-4 pt-3 border-t border-slate-100 flex gap-2">
+                                <input type="text" id="custom-msg-${member.id}" placeholder="Koyi sandesh likhein (optional)..." 
+                                       class="flex-grow p-3 text-base border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500">
+                                <button onclick="sendCustomAlert('${member.id}', '${member.name}', '${member.relation}')" 
+                                        class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-3 rounded-xl transition duration-150 text-sm">
+                                    Message Bhejo ⚡
+                                </button>
+                            </div>
+                        `;
+                        membersListDiv.appendChild(memberCard);
+                    }
+                });
+
+                if (!foundOthers) {
+                    membersListDiv.innerHTML = `
+                        <div class="bg-amber-50 border-2 border-dashed border-amber-300 p-8 rounded-3xl text-center text-slate-700">
+                            <p class="text-4xl mb-3">🏠</p>
+                            <p class="text-xl font-bold">Ghar me koi aur sadasya online nahi hai.</p>
+                            <p class="text-sm text-slate-500 mt-2">Apne gharwalo ke phone par ye link kholiye aur unhe setup karne ko kahiye!</p>
+                        </div>
+                    `;
+                }
+            });
+
+            // 3. LISTEN FOR INCOMING ALERTS
+            incomingAlertRef = database.ref(`/alerts/${currentUserId}`);
+            incomingAlertRef.on('value', (snapshot) => {
+                const alertData = snapshot.val();
+                if (alertData && alertData.status === 'pending') {
+                    triggerEmergencyAlertScreen(alertData);
+                } else {
+                    dismissEmergencyAlertScreen();
+                }
+            });
+        }
+
+        // Profile badalne ki suvidha (Reset)
+        function resetProfile() {
+            if (confirm("Kya aap sach me apni profile badalna chahte hain?")) {
+                if (currentUserId) {
+                    database.ref(`/users/${currentUserId}`).remove();
+                    database.ref(`/alerts/${currentUserId}`).remove();
+                }
+                localStorage.removeItem('family_intercom_user');
+                location.reload();
+            }
+        }
+
+        // ----------------- SENDING ALERT ENGINE -----------------
+        function sendCustomAlert(receiverId, receiverName, receiverRelation) {
+            const inputField = document.getElementById(`custom-msg-${receiverId}`);
+            const messageText = inputField.value.trim();
+            
+            if (!messageText) {
+                alert("Pehle koi message type karein!");
+                return;
+            }
+
+            sendAlert(receiverId, receiverName, receiverRelation, messageText);
+            inputField.value = ''; // Input clear karein
+        }
+
+        function sendAlert(receiverId, receiverName, receiverRelation, customMessage = "") {
+            initializeAudio(); // Audio safety trigger
+            
+            // Set alert node setup
+            const alertPayload = {
+                senderId: currentUserId,
+                senderName: currentUser.name,
+                senderRelation: currentUser.relation,
+                message: customMessage,
+                timestamp: Date.now(),
+                status: 'pending'
+            };
+
+            // Target recipient alert path setting
+            sentAlertRef = database.ref(`/alerts/${receiverId}`);
+            sentAlertRef.set(alertPayload);
+
+            // Open outgoing modal dashboard status
+            document.getElementById('outgoing-target-text').innerText = `${receiverRelation} (${receiverName}) ko alert bhej diya hai.`;
+            document.getElementById('acknowledgment-status').innerHTML = `Unke phone par ghanti baj rhi hai... 🔔`;
+            document.getElementById('outgoing-modal').classList.remove('hidden');
+
+            // Listen for changes in real-time response feedback status
+            sentAlertRef.on('value', (snapshot) => {
+                const updatedAlert = snapshot.val();
+                if (updatedAlert && updatedAlert.status === 'acknowledged') {
+                    // Update outgoing panel to success with confirmation
+                    document.getElementById('acknowledgment-status').innerHTML = `
+                        <span class="text-emerald-600 font-extrabold text-2xl block animate-bounce">
+                            🎉 ${receiverName} ne kaha: "AA RHA HU!"
+                        </span>
+                    `;
+                    // Automatically dismiss modal after some time
+                    setTimeout(() => {
+                        clearOutgoingAlert();
+                    }, 5000);
+                }
+            });
+        }
+
+        function clearOutgoingAlert() {
+            if (sentAlertRef) {
+                sentAlertRef.off(); // Turn off listener safety
+                sentAlertRef.remove(); // Safely clear alert log
+                sentAlertRef = null;
+            }
+            document.getElementById('outgoing-modal').classList.add('hidden');
+        }
+
+        // ----------------- RECEIVING ALERT ENGINE -----------------
+        // 2. DYNAMIC RELATION MESSAGE FORMATTER (SABSE IMPORTANTE)
+        function getDynamicHeadline(senderName, senderRelation) {
+            const myRelation = currentUser.relation;
+
+            // 1. Agar 'Baba' ne click kiya hai (Sender is Baba)
+            if (senderRelation === "Baba") {
+                return `🚨 Baba bula rhe hain!`;
+            }
+            
+            // 2. Agar 'Dadi' ne click kiya hai
+            if (senderRelation === "Dadi") {
+                return `🚨 Dadi bula rhi hain!`;
+            }
+
+            // 3. Agar 'Beta'/'Nati' Baba ko bhej rha hai (Hum Baba hain, aur sender Beta/Nati hai)
+            if (myRelation === "Baba" || myRelation === "Dadi") {
+                if (senderRelation === "Nati") {
+                    return `🚨 Nati ${senderName} bula rha hai!`;
+                }
+                if (senderRelation === "Beta") {
+                    return `🚨 Beta ${senderName} bula rha hai!`;
+                }
+                if (senderRelation === "Pota") {
+                    return `🚨 Pota ${senderName} bula rha hai!`;
+                }
+            }
+
+            // 4. Default dynamic messages generic relationships
+            if (senderRelation === "Papa") {
+                return `🚨 Papa bula rhe hain!`;
+            }
+            if (senderRelation === "Mummy") {
+                return `🚨 Mummy bula rhi hain!`;
+            }
+
+            // Standard fallback formatting rules
+            return `🚨 ${senderRelation} ${senderName} bula rha hai!`;
+        }
+
+        function triggerEmergencyAlertScreen(alertData) {
+            const headline = getDynamicHeadline(alertData.senderName, alertData.senderRelation);
+            
+            document.getElementById('alert-headline').innerText = headline;
+            
+            if (alertData.message) {
+                document.getElementById('alert-custom-msg').innerText = `💬 "${alertData.message}"`;
+            } else {
+                document.getElementById('alert-custom-msg').innerText = "";
+            }
+
+            // Overlay modal display open
+            document.getElementById('alert-overlay').classList.remove('hidden');
+
+            // 3. Loud continuous sound trigger activation
+            startLoudBeep();
+        }
+
+        function dismissEmergencyAlertScreen() {
+            document.getElementById('alert-overlay').classList.add('hidden');
+            stopLoudBeep();
+        }
+
+        // 4. QUICK REPLY BUTTON CLICK ACTION
+        function acknowledgeAlert() {
+            if (incomingAlertRef) {
+                // Sender status database ko signal de ki status badal gaya hai
+                incomingAlertRef.update({
+                    status: 'acknowledged'
+                });
+            }
+            dismissEmergencyAlertScreen();
+        }
+
+        // Global Dynamic Toast Alerts Handler
+        function showToast(text) {
+            const toast = document.getElementById('toast-notif');
+            document.getElementById('toast-text').innerText = text;
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3500);
+        }
+    </script>
+</body>
+</html>
